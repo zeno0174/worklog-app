@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>근무표</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="근무표" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#14213D" />
+<style>
+  :root {
+    --navy: #14213D;
+    --paper: #FFFDF8;
+    --ink: #1F2933;
+    --muted: #7C8798;
+    --line: #E4DFD2;
+    --tint-idle: #EDEBE3; --text-idle: #52585F;
+    --tint-정상: #DCFCE7; --text-정상: #166534;
+    --tint-지각: #FEE2E2; --text-지각: #991B1B;
+    --tint-초과: #FEF3C7; --text-초과: #92400E;
+    --tint-휴일근무: #F3E8FF; --text-휴일근무: #6B21A8;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header { padding: 28px 24px 0; }
+  .date { font-size: 13px; color: var(--muted); }
+
+  .hero {
+    margin: 16px 20px 0;
+    padding: 28px 20px;
+    border-radius: 20px;
+    background: var(--tint-idle);
+    color: var(--text-idle);
+    transition: background .25s ease, color .25s ease;
+  }
+  .hero .state { font-size: 22px; font-weight: 700; line-height: 1.35; }
+  .hero .detail { font-size: 14px; margin-top: 6px; opacity: .85; }
+
+  main {
+    flex: 1;
+    padding: 20px 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .primary-btn {
+    width: 100%;
+    padding: 18px 0;
+    border: none;
+    border-radius: 16px;
+    font-size: 17px;
+    font-weight: 700;
+    background: var(--navy);
+    color: #fff;
+  }
+  .primary-btn.outline { background: transparent; color: var(--navy); border: 2px solid var(--navy); }
+  .primary-btn:disabled { background: #D9D4C7; color: #8B8577; border-color: transparent; }
+
+  #message { min-height: 18px; font-size: 13px; color: var(--muted); text-align: center; }
+
+  section.note { border-top: 1px solid var(--line); padding-top: 18px; }
+  section.note label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  textarea {
+    width: 100%;
+    min-height: 76px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    font-size: 15px;
+    font-family: inherit;
+    resize: vertical;
+    background: #fff;
+    color: var(--ink);
+  }
+  .note-save {
+    margin-top: 10px;
+    width: 100%;
+    padding: 12px 0;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  footer { text-align: center; padding: 20px 0 32px; }
+  footer a { font-size: 12px; color: var(--muted); text-decoration: none; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="date" id="dateLabel">불러오는 중…</div>
+  </header>
+
+  <div class="hero" id="hero">
+    <div class="state" id="heroState">오늘 기록을 확인하는 중…</div>
+    <div class="detail" id="heroDetail">&nbsp;</div>
+  </div>
+
+  <main>
+    <button class="primary-btn" id="actionBtn" disabled>불러오는 중…</button>
+    <div id="message"></div>
+
+    <section class="note">
+      <label for="noteInput">오늘 메모</label>
+      <textarea id="noteInput" placeholder="오늘 한 일을 간단히 적어보세요"></textarea>
+      <button class="note-save" id="saveNoteBtn">메모 저장</button>
+    </section>
+  </main>
+
+  <footer><a href="#" id="refreshLink">새로고침</a></footer>
+
+<script>
+  // ====== 이 두 값만 내 것으로 바꾸면 끝입니다 ======
+  const WEB_APP_URL = '여기에-Apps-Script-웹앱-URL을-붙여넣으세요';
+  const SECRET = '여기에-Apps-Script와-똑같은-비밀문자열을-붙여넣으세요';
+  // ==================================================
+
+  const $ = (id) => document.getElementById(id);
+
+  function todayYmd() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  function todayLabel() {
+    const d = new Date();
+    return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+  }
+
+  function setMessage(text, isError) {
+    $('message').textContent = text || '';
+    $('message').style.color = isError ? '#B91C1C' : 'var(--muted)';
+  }
+
+  async function callApi(payload) {
+    if (payload) {
+      // POST 요청은 CORS 사전 확인(preflight)을 피하려고 text/plain으로 보냅니다.
+      // (내용 자체는 그대로 JSON 문자열입니다. Apps Script 쪽에서 JSON.parse로 읽습니다.)
+      const res = await fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ ...payload, secret: SECRET }),
+      });
+      return res.json();
+    }
+    const res = await fetch(`${WEB_APP_URL}?secret=${encodeURIComponent(SECRET)}&workDate=${todayYmd()}`);
+    return res.json();
+  }
+
+  function applyHero(record) {
+    const hero = $('hero');
+    const stateEl = $('heroState');
+    const detailEl = $('heroDetail');
+    const btn = $('actionBtn');
+
+    const tint = (key) => {
+      hero.style.background = `var(--tint-${key})`;
+      hero.style.color = `var(--text-${key})`;
+    };
+
+    if (!record || !record.check_in_local) {
+      tint('idle');
+      stateEl.textContent = '아직 출근 전이에요';
+      detailEl.textContent = '출근하기를 누르면 지금 시간이 기록됩니다.';
+      btn.textContent = '출근하기';
+      btn.className = 'primary-btn';
+      btn.disabled = false;
+      btn.dataset.action = 'checkin';
+    } else if (!record.check_out_local) {
+      tint(record.status === '지각' ? '지각' : '정상');
+      stateEl.textContent = `근무 중 · ${record.check_in_local} 출근`;
+      detailEl.textContent = record.status === '지각' ? '오늘은 지각으로 기록됐어요.' : '오늘도 수고하고 계세요.';
+      btn.textContent = '퇴근하기';
+      btn.className = 'primary-btn outline';
+      btn.disabled = false;
+      btn.dataset.action = 'checkout';
+    } else {
+      const statusKey = ['정상', '지각', '초과', '휴일근무'].includes(record.status) ? record.status : '정상';
+      tint(statusKey);
+      stateEl.textContent = `근무 종료 · ${record.worked_minutes || 0}분 근무`;
+      detailEl.textContent = `${record.check_in_local} 출근 → ${record.check_out_local} 퇴근`;
+      btn.textContent = '오늘 근무 종료';
+      btn.className = 'primary-btn';
+      btn.disabled = true;
+      btn.dataset.action = '';
+    }
+  }
+
+  function render(record) {
+    applyHero(record);
+    $('noteInput').value = (record && record.work_note) || '';
+  }
+
+  async function loadToday() {
+    $('dateLabel').textContent = todayLabel();
+    try {
+      const data = await callApi(null);
+      if (data.ok) render(data.record);
+      else setMessage(data.message, true);
+    } catch (err) {
+      setMessage('불러오지 못했어요: ' + err, true);
+    }
+  }
+
+  $('actionBtn').addEventListener('click', async () => {
+    const action = $('actionBtn').dataset.action;
+    if (!action) return;
+    $('actionBtn').disabled = true;
+    setMessage(action === 'checkin' ? '출근 처리 중…' : '퇴근 처리 중…');
+    try {
+      const data = await callApi({ action });
+      setMessage(data.message, !data.ok);
+      await loadToday();
+    } catch (err) {
+      setMessage('오류: ' + err, true);
+      $('actionBtn').disabled = false;
+    }
+  });
+
+  $('saveNoteBtn').addEventListener('click', async () => {
+    setMessage('메모 저장 중…');
+    try {
+      const data = await callApi({ action: 'note', note: $('noteInput').value });
+      setMessage(data.message, !data.ok);
+    } catch (err) {
+      setMessage('오류: ' + err, true);
+    }
+  });
+
+  $('refreshLink').addEventListener('click', (e) => {
+    e.preventDefault();
+    loadToday();
+  });
+
+  loadToday();
+</script>
+</body>
+</html>
