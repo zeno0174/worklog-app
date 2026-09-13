@@ -98,6 +98,85 @@
 
   footer { text-align: center; padding: 20px 0 32px; }
   footer a { font-size: 12px; color: var(--muted); text-decoration: none; }
+
+  .tabs {
+    display: flex;
+    gap: 24px;
+    padding: 0 24px;
+    margin-top: 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    background: none;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 0 0 12px;
+    cursor: pointer;
+  }
+  .tab.active { color: var(--navy); border-bottom: 2px solid var(--navy); }
+  .hidden { display: none !important; }
+
+  .month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 8px;
+  }
+  .month-nav button {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: var(--navy);
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .month-nav .month-label { font-size: 16px; font-weight: 700; color: var(--ink); }
+
+  .weekday-row {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    padding: 0 20px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    padding: 10px 20px 4px;
+  }
+  .day-cell {
+    aspect-ratio: 1;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .day-cell.other-month { visibility: hidden; }
+  .day-cell.is-today { border: 2px solid var(--navy); font-weight: 700; }
+  .day-cell.status-정상 { background: var(--tint-정상); color: var(--text-정상); }
+  .day-cell.status-지각 { background: var(--tint-지각); color: var(--text-지각); }
+  .day-cell.status-초과 { background: var(--tint-초과); color: var(--text-초과); }
+  .day-cell.status-휴일근무 { background: var(--tint-휴일근무); color: var(--text-휴일근무); }
+  .day-cell.selected { outline: 2px solid var(--navy); outline-offset: 1px; }
+
+  .day-detail {
+    margin: 16px 20px 32px;
+    padding: 16px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .day-detail .empty { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -105,21 +184,41 @@
     <div class="date" id="dateLabel">불러오는 중…</div>
   </header>
 
-  <div class="hero" id="hero">
-    <div class="state" id="heroState">오늘 기록을 확인하는 중…</div>
-    <div class="detail" id="heroDetail">&nbsp;</div>
+  <nav class="tabs">
+    <button class="tab active" id="tabToday" data-tab="today">오늘</button>
+    <button class="tab" id="tabCalendar" data-tab="calendar">이번 달</button>
+  </nav>
+
+  <div id="todayView">
+    <div class="hero" id="hero">
+      <div class="state" id="heroState">오늘 기록을 확인하는 중…</div>
+      <div class="detail" id="heroDetail">&nbsp;</div>
+    </div>
+
+    <main>
+      <button class="primary-btn" id="actionBtn" disabled>불러오는 중…</button>
+      <div id="message"></div>
+
+      <section class="note">
+        <label for="noteInput">오늘 메모</label>
+        <textarea id="noteInput" placeholder="오늘 한 일을 간단히 적어보세요"></textarea>
+        <button class="note-save" id="saveNoteBtn">메모 저장</button>
+      </section>
+    </main>
   </div>
 
-  <main>
-    <button class="primary-btn" id="actionBtn" disabled>불러오는 중…</button>
-    <div id="message"></div>
-
-    <section class="note">
-      <label for="noteInput">오늘 메모</label>
-      <textarea id="noteInput" placeholder="오늘 한 일을 간단히 적어보세요"></textarea>
-      <button class="note-save" id="saveNoteBtn">메모 저장</button>
-    </section>
-  </main>
+  <div id="calendarView" class="hidden">
+    <div class="month-nav">
+      <button id="prevMonthBtn" aria-label="이전 달">‹</button>
+      <div class="month-label" id="monthLabel">불러오는 중…</div>
+      <button id="nextMonthBtn" aria-label="다음 달">›</button>
+    </div>
+    <div class="weekday-row">
+      <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+    </div>
+    <div class="calendar-grid" id="calendarGrid"></div>
+    <div class="day-detail" id="dayDetail"><span class="empty">날짜를 눌러보세요</span></div>
+  </div>
 
   <footer><a href="#" id="refreshLink">새로고침</a></footer>
 
@@ -244,8 +343,110 @@
 
   $('refreshLink').addEventListener('click', (e) => {
     e.preventDefault();
-    loadToday();
+    if (currentTab === 'today') loadToday();
+    else loadCalendar();
   });
+
+  // ====== 여기부터 월력형(달력) 화면 ======
+  let currentTab = 'today';
+  let calendarDate = new Date(); // 1일로 안 맞춰도 연/월만 씁니다.
+  let calendarRecords = [];
+
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function yearMonthOf(date) { return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`; }
+
+  function switchTab(tab) {
+    currentTab = tab;
+    $('tabToday').classList.toggle('active', tab === 'today');
+    $('tabCalendar').classList.toggle('active', tab === 'calendar');
+    $('todayView').classList.toggle('hidden', tab !== 'today');
+    $('calendarView').classList.toggle('hidden', tab !== 'calendar');
+    if (tab === 'calendar' && calendarRecords.length === 0) loadCalendar();
+  }
+
+  $('tabToday').addEventListener('click', () => switchTab('today'));
+  $('tabCalendar').addEventListener('click', () => switchTab('calendar'));
+
+  async function fetchMonth(yearMonth) {
+    const res = await fetch(`${WEB_APP_URL}?secret=${encodeURIComponent(SECRET)}&action=month&yearMonth=${yearMonth}`);
+    return res.json();
+  }
+
+  function buildCalendarGrid(yearMonth, records) {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const recordMap = {};
+    records.forEach((r) => { recordMap[r.work_date] = r; });
+
+    const firstWeekday = new Date(year, month - 1, 1).getDay(); // 0=일요일
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const todayStr = todayYmd();
+
+    const grid = $('calendarGrid');
+    grid.innerHTML = '';
+
+    for (let i = 0; i < firstWeekday; i++) {
+      const blank = document.createElement('div');
+      blank.className = 'day-cell other-month';
+      grid.appendChild(blank);
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${pad2(month)}-${pad2(d)}`;
+      const record = recordMap[dateStr];
+      const cell = document.createElement('div');
+      cell.className = 'day-cell';
+      if (dateStr === todayStr) cell.classList.add('is-today');
+      if (record && record.status) cell.classList.add('status-' + record.status);
+      cell.textContent = String(d);
+      cell.addEventListener('click', () => {
+        document.querySelectorAll('.day-cell.selected').forEach((el) => el.classList.remove('selected'));
+        cell.classList.add('selected');
+        showDayDetail(dateStr, record);
+      });
+      grid.appendChild(cell);
+    }
+  }
+
+  function showDayDetail(dateStr, record) {
+    const box = $('dayDetail');
+    const niceDate = dateStr.replace(/-/g, '. ');
+    if (!record || !record.check_in_local) {
+      box.innerHTML = `${niceDate} · <span class="empty">기록 없음</span>`;
+      return;
+    }
+    const outPart = record.check_out_local ? `${record.check_out_local} 퇴근` : '근무 중';
+    const workedPart = record.worked_minutes ? ` · ${record.worked_minutes}분` : '';
+    const statusPart = record.status ? ` · ${record.status}` : '';
+    const notePart = record.work_note ? `<br>메모: ${record.work_note}` : '';
+    box.innerHTML = `${niceDate} · ${record.check_in_local} 출근 → ${outPart}${workedPart}${statusPart}${notePart}`;
+  }
+
+  async function loadCalendar() {
+    const yearMonth = yearMonthOf(calendarDate);
+    $('monthLabel').textContent = calendarDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
+    $('dayDetail').innerHTML = '<span class="empty">날짜를 눌러보세요</span>';
+    try {
+      const data = await fetchMonth(yearMonth);
+      if (data.ok) {
+        calendarRecords = data.records;
+        buildCalendarGrid(yearMonth, data.records);
+      } else {
+        $('dayDetail').textContent = data.message;
+      }
+    } catch (err) {
+      $('dayDetail').textContent = '불러오지 못했어요: ' + err;
+    }
+  }
+
+  $('prevMonthBtn').addEventListener('click', () => {
+    calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1);
+    loadCalendar();
+  });
+  $('nextMonthBtn').addEventListener('click', () => {
+    calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1);
+    loadCalendar();
+  });
+  // ====== 월력형(달력) 화면 끝 ======
 
   loadToday();
 </script>
